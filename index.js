@@ -303,33 +303,57 @@ app.get('/', (req, res) => {
   `);
 });
 
+// --- DEĞİŞİKLİK BURADA BAŞLIYOR: ESNEK KAYDETME ROTASI ---
 app.post('/api/inbound', async (req, res) => {
   try {
-    const { recipient, sender, subject, body } = req.body;
+    let { recipient, sender, subject, body } = req.body;
+
+    // Alıcı ve gönderici içerisindeki isim/parantezleri temizle, sadece e-postayı al
+    // Örn: "Replit <replit@kaliciemail.webredirect.org>" -> "replit@kaliciemail.webredirect.org"
+    // Bu sayede tam eşleşme aranırken takılmaz.
+    const extractEmail = (str) => {
+      if (!str) return null;
+      // Regex ile <email@domain.com> formatını veya düz email@domain.com formatını ayıkla
+      const match = str.match(/<([^>]+)>/) || str.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      return match ? match[1].toLowerCase().trim() : str.toLowerCase().trim();
+    };
+
+    recipient = extractEmail(recipient);
+    sender = extractEmail(sender); // Göndericiyi de temizlemek iyidir
+
+    // Veritabanına kaydet
     await pool.query(
       'INSERT INTO emails (recipient, sender, subject, body) VALUES ($1, $2, $3, $4)',
-      [recipient, sender, subject, body]
+      [recipient, sender, subject || 'Konusuz E-posta', body || '']
     );
+
     res.status(200).json({ success: true, message: 'Mail kaydedildi.' });
   } catch (err) {
-    console.error(err);
+    console.error("Mail kaydetme hatası:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+// --- DEĞİŞİKLİK BURADA BİTİYOR ---
 
+// --- DEĞİŞİKLİK BURADA BAŞLIYOR: ESNEK ARAMA SORGU ROTASI ---
 app.get('/api/inbox/:email', async (req, res) => {
   try {
-    const { email } = req.params;
+    // Alınan e-postayı temizle (trim ve toLowerCase)
+    const email = req.params.email.toLowerCase().trim();
+    
+    // Veritabanında LOWER ve LIKE ile esnek eşleşme yap
+    // Bu sayede "Replit" <replit@...> formatında kayıtlıysa bile bulabilir.
     const result = await pool.query(
-      'SELECT * FROM emails WHERE recipient = $1 ORDER BY received_at DESC',
-      [email]
+      'SELECT * FROM emails WHERE LOWER(recipient) LIKE $1 ORDER BY received_at DESC',
+      [`%${email}%`]
     );
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("Mail getirme hatası:", err);
     res.status(500).json({ error: err.message });
   }
 });
+// --- DEĞİŞİKLİK BURADA BİTİYOR ---
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
